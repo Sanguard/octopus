@@ -1,0 +1,206 @@
+#include <algorithm>
+#include <cassert>
+#include <stdexcept>
+#include <unordered_map>
+#include <vector>
+#include <iostream>
+
+using namespace std;
+
+// Шаблонный класс PtrVector для работы с динамическими массивами указателей
+template <typename T>
+class PtrVector {
+public:
+    PtrVector() = default;
+
+    // Создаёт вектор указателей на копии объектов из other
+    PtrVector(const PtrVector& other) {
+        items_.reserve(other.items_.size());
+        try {
+            for (auto p : other.items_) {
+                auto p_copy = p ? new T(*p) : nullptr;
+                items_.push_back(p_copy);
+            }
+        } catch (...) {
+            DeleteItems();
+            throw;
+        }
+    }
+
+    // Операция присваивания
+    PtrVector& operator=(const PtrVector& rhs) {
+        if (this != &rhs) {
+            PtrVector temp(rhs);
+            swap(temp.items_, this->items_);
+        }
+        return *this;
+    }
+
+    ~PtrVector() {
+        DeleteItems();
+    }
+
+    void Add(T* item) {
+        items_.push_back(item);
+    }
+
+    vector<T*>& GetItems() noexcept {
+        return items_;
+    }
+
+    const vector<T*>& GetItems() const noexcept {
+        return items_;
+    }
+
+private:
+    void DeleteItems() noexcept {
+        for (auto p : items_) {
+            delete p;
+        }
+        items_.clear();
+    }
+
+    vector<T*> items_;
+};
+
+// Класс Tentacle (щупальце)
+class Tentacle {
+public:
+    explicit Tentacle(int id) noexcept : id_(id), linked_tentacle_(nullptr) {}
+
+    int GetId() const noexcept {
+        return id_;
+    }
+
+    Tentacle* GetLinkedTentacle() const noexcept {
+        return linked_tentacle_;
+    }
+
+    void LinkTo(Tentacle& tentacle) noexcept {
+        linked_tentacle_ = &tentacle;
+    }
+
+    void Unlink() noexcept {
+        linked_tentacle_ = nullptr;
+    }
+
+private:
+    int id_;
+    Tentacle* linked_tentacle_;
+};
+
+// Класс Octopus (осьминог)
+class Octopus {
+public:
+    Octopus() : Octopus(8) {}
+
+    explicit Octopus(int num_tentacles) {
+        try {
+            for (int i = 1; i <= num_tentacles; ++i) {
+                tentacles_.Add(new Tentacle(i));
+            }
+        } catch (...) {
+            Cleanup();
+            throw;
+        }
+    }
+
+    // Копирующий конструктор
+    Octopus(const Octopus& other) : tentacles_(other.tentacles_) {
+        CopyTentacleLinks(other);
+    }
+
+    // Оператор присваивания с использованием copy-and-swap
+    Octopus& operator=(const Octopus& other) {
+        if (this != &other) {
+            Octopus temp(other);
+            swap(tentacles_, temp.tentacles_);
+        }
+        return *this;
+    }
+
+    ~Octopus() {
+        Cleanup();
+    }
+
+    Tentacle& AddTentacle() {
+        int new_id = tentacles_.GetItems().size() + 1;
+        Tentacle* new_tentacle = new Tentacle(new_id);
+        tentacles_.Add(new_tentacle);
+        return *new_tentacle;
+    }
+
+    int GetTentacleCount() const noexcept {
+        return tentacles_.GetItems().size();
+    }
+
+    const Tentacle& GetTentacle(size_t index) const {
+        return *tentacles_.GetItems().at(index);
+    }
+
+    Tentacle& GetTentacle(size_t index) {
+        return *tentacles_.GetItems().at(index);
+    }
+
+private:
+    void Cleanup() {
+        tentacles_.GetItems().clear();
+    }
+
+    void CopyTentacleLinks(const Octopus& other) {
+        unordered_map<const Tentacle*, Tentacle*> tentacle_map;
+
+        for (size_t i = 0; i < other.tentacles_.GetItems().size(); ++i) {
+            tentacle_map[other.tentacles_.GetItems()[i]] = tentacles_.GetItems()[i];
+        }
+
+        for (size_t i = 0; i < other.tentacles_.GetItems().size(); ++i) {
+            const Tentacle* original_linked_tentacle = other.tentacles_.GetItems()[i]->GetLinkedTentacle();
+            if (original_linked_tentacle) {
+                tentacles_.GetItems()[i]->LinkTo(*tentacle_map[original_linked_tentacle]);
+            }
+        }
+    }
+
+    PtrVector<Tentacle> tentacles_;
+};
+
+// Тестирование присваивания осьминогов
+int main() {
+    {
+        Octopus octopus1(3);
+        octopus1.GetTentacle(2).LinkTo(octopus1.GetTentacle(1));
+
+        Octopus octopus2(10);
+        octopus2 = octopus1;
+
+        assert(octopus2.GetTentacleCount() == octopus1.GetTentacleCount());
+        for (int i = 0; i < octopus2.GetTentacleCount(); ++i) {
+            auto& tentacle1 = octopus1.GetTentacle(i);
+            auto& tentacle2 = octopus2.GetTentacle(i);
+            assert(&tentacle2 != &tentacle1);
+            assert(tentacle2.GetId() == tentacle1.GetId());
+            assert(tentacle2.GetLinkedTentacle() == tentacle1.GetLinkedTentacle());
+        }
+    }
+
+    {
+        Octopus octopus(3);
+        octopus.GetTentacle(0).LinkTo(octopus.GetTentacle(1));
+
+        vector<pair<Tentacle*, Tentacle*>> tentacles;
+        for (int i = 0; i < octopus.GetTentacleCount(); ++i) {
+            tentacles.push_back({&octopus.GetTentacle(i), octopus.GetTentacle(i).GetLinkedTentacle()});
+        }
+
+        octopus = octopus;
+
+        assert(octopus.GetTentacleCount() == static_cast<int>(tentacles.size()));
+        for (int i = 0; i < octopus.GetTentacleCount(); ++i) {
+            auto& tentacle_with_link = tentacles.at(i);
+            assert(&octopus.GetTentacle(i) == tentacle_with_link.first);
+            assert(octopus.GetTentacle(i).GetLinkedTentacle() == tentacle_with_link.second);
+        }
+    }
+
+}
